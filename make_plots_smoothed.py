@@ -53,12 +53,17 @@ def pred_value(p):
         if c is not None and thr and thr > 0:
             return float(np.clip(c / thr, 0.0, 1.0))
     if "instances" in p:
+        best = None
         for inst in p["instances"].values():
             nested = inst.get("nested")
             if nested and nested.get("type") in ("forall", "forn", "forpairs"):
                 c, thr = nested.get("count"), nested.get("threshold")
                 if c is not None and thr and thr > 0:
-                    return float(np.clip(c / thr, 0.0, 1.0))
+                    v = float(np.clip(c / thr, 0.0, 1.0))
+                    if best is None or v > best:
+                        best = v
+        if best is not None:
+            return best
     return 1.0 if p.get("satisfied") else 0.0
 
 
