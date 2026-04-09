@@ -109,7 +109,7 @@ def plot_one(task_id, episode_id, out_path):
     y1 = np.arange(N1 + 1)
     mesh1 = ax_v1.pcolormesh(
         x1, y1, v1_states.T, cmap=cmap, norm=norm,
-        edgecolors="white", linewidth=0.4, antialiased=False,
+        edgecolors="none", antialiased=False, shading="flat",
     )
     ax_v1.set_yticks(np.arange(N1) + 0.5)
     ax_v1.set_yticklabels([truncate(l, 38) for l in v1_labels], fontsize=8)
@@ -124,7 +124,7 @@ def plot_one(task_id, episode_id, out_path):
     y2 = np.arange(N2 + 1)
     ax_v2.pcolormesh(
         x2, y2, v2_values.T, cmap=cmap, norm=norm,
-        edgecolors="white", linewidth=0.4, antialiased=False,
+        edgecolors="none", antialiased=False, shading="flat",
     )
     ax_v2.set_yticks(np.arange(N2) + 0.5)
     ax_v2.set_yticklabels([truncate(l, 60) for l in v2_labels], fontsize=8)
