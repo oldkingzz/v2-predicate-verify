@@ -95,6 +95,23 @@ def smooth_series(vals: np.ndarray, kernel: int = 5, min_hold: int = 10,
 # Per-episode processing
 # ---------------------------------------------------------------------------
 
+def split_by_episode_id(records):
+    """Split records at episode_id boundaries (step resets)."""
+    segments = []
+    current = []
+    prev_ep = None
+    for rec in records:
+        ep = rec.get("episode_id", 0)
+        if prev_ep is not None and ep != prev_ep:
+            segments.append(current)
+            current = []
+        current.append(rec)
+        prev_ep = ep
+    if current:
+        segments.append(current)
+    return segments
+
+
 def process_episode(in_path: str, out_path: str, kernel: int, min_hold: int):
     """Return (flips_before, flips_after) for this episode."""
     with open(in_path) as f:
@@ -102,46 +119,55 @@ def process_episode(in_path: str, out_path: str, kernel: int, min_hold: int):
     if not records:
         return 0, 0
 
-    n_preds = len(records[0]["predicates"])
-    n_steps = len(records)
+    # Split at episode_id boundaries to handle step resets
+    segments = split_by_episode_id(records)
 
-    # Build raw matrix [n_steps, n_preds]
-    raw = np.zeros((n_steps, n_preds), dtype=np.float64)
-    for t, rec in enumerate(records):
-        for j, p in enumerate(rec["predicates"]):
-            raw[t, j] = pred_value(p)
+    all_smoothed_records = []
+    total_fb, total_fa = 0, 0
 
-    # Smooth each predicate column
-    smoothed = np.zeros_like(raw)
-    for j in range(n_preds):
-        smoothed[:, j] = smooth_series(raw[:, j], kernel=kernel, min_hold=min_hold)
+    for seg_records in segments:
+        n_preds = len(seg_records[0]["predicates"])
+        n_steps = len(seg_records)
 
-    # Count flips (transitions across 0.5) before and after
-    def count_flips(mat):
-        binary = (mat >= 0.5).astype(int)
-        return int(np.sum(np.abs(np.diff(binary, axis=0))))
+        # Build raw matrix [n_steps, n_preds]
+        raw = np.zeros((n_steps, n_preds), dtype=np.float64)
+        for t, rec in enumerate(seg_records):
+            for j, p in enumerate(rec["predicates"]):
+                raw[t, j] = pred_value(p)
 
-    fb = count_flips(raw)
-    fa = count_flips(smoothed)
+        # Smooth each predicate column
+        smoothed = np.zeros_like(raw)
+        for j in range(n_preds):
+            smoothed[:, j] = smooth_series(raw[:, j], kernel=kernel, min_hold=min_hold)
+
+        # Count flips (transitions across 0.5) before and after
+        def count_flips(mat):
+            binary = (mat >= 0.5).astype(int)
+            return int(np.sum(np.abs(np.diff(binary, axis=0))))
+
+        total_fb += count_flips(raw)
+        total_fa += count_flips(smoothed)
+
+        # Build smoothed records for this segment
+        for t, rec in enumerate(seg_records):
+            rec2 = copy.deepcopy(rec)
+            for j, p in enumerate(rec2["predicates"]):
+                inject_value(p, smoothed[t, j])
+            sat = sum(1 for p in rec2["predicates"] if p.get("satisfied"))
+            total = len(rec2["predicates"])
+            rec2["satisfied_count"] = sat
+            rec2["total_count"] = total
+            rec2["progress"] = sat / total if total else 0.0
+            rec2["done"] = sat == total
+            all_smoothed_records.append(rec2)
+
+    fb, fa = total_fb, total_fa
 
     # Write output
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    out_records = []
-    for t, rec in enumerate(records):
-        rec2 = copy.deepcopy(rec)
-        for j, p in enumerate(rec2["predicates"]):
-            inject_value(p, smoothed[t, j])
-        # Recompute top-level progress
-        sat = sum(1 for p in rec2["predicates"] if p.get("satisfied"))
-        total = len(rec2["predicates"])
-        rec2["satisfied_count"] = sat
-        rec2["total_count"] = total
-        rec2["progress"] = sat / total if total else 0.0
-        rec2["done"] = sat == total
-        out_records.append(json.dumps(rec2, ensure_ascii=False))
-
+    out_lines = [json.dumps(rec, ensure_ascii=False) for rec in all_smoothed_records]
     with open(out_path, "w") as f:
-        f.write("\n".join(out_records) + "\n")
+        f.write("\n".join(out_lines) + "\n")
 
     return fb, fa
 
