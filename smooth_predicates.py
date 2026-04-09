@@ -58,34 +58,37 @@ def inject_value(p, val):
 # Smoothing
 # ---------------------------------------------------------------------------
 
-def smooth_series(vals: np.ndarray, kernel: int = 5, min_hold: int = 10) -> np.ndarray:
-    """Median filter + monotonic hold."""
+def smooth_series(vals: np.ndarray, kernel: int = 5, min_hold: int = 10,
+                   drop_thresh: float = 0.3) -> np.ndarray:
+    """Median filter + relative monotonic hold.
+
+    The hold triggers whenever the value drops by more than *drop_thresh*
+    from the recent peak and stays low for fewer than *min_hold* steps.
+    This catches both dips below 0.5 AND partial dips like 1.0 → 0.5.
+    """
     # Step 1: median filter
     v = medfilt(vals, kernel_size=kernel).astype(np.float64)
 
-    # Step 2: monotonic hold — fill short dips below 0.5
+    # Step 2: relative monotonic hold
     out = v.copy()
-    i = 0
     n = len(out)
+    peak = out[0]
+    i = 0
     while i < n:
-        if out[i] >= 0.5:
-            high_val = out[i]
+        if out[i] >= peak - drop_thresh:
+            peak = max(peak, out[i])
             i += 1
             continue
-        # out[i] < 0.5 — start of a dip
-        if i == 0:
-            i += 1
-            continue
-        high_val = out[i - 1]
-        if high_val < 0.5:
-            i += 1
-            continue
+        # out[i] dropped significantly from peak — start of a dip
         dip_start = i
-        while i < n and out[i] < 0.5:
+        while i < n and out[i] < peak - drop_thresh:
             i += 1
         dip_len = i - dip_start
         if dip_len < min_hold:
-            out[dip_start:i] = high_val
+            out[dip_start:i] = peak
+        else:
+            # Real drop — update peak to the new level
+            peak = out[i - 1] if i > dip_start else peak
     return out
 
 # ---------------------------------------------------------------------------
